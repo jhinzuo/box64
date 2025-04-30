@@ -1,10 +1,4 @@
-# ### Auto build Box64 and release its binary with Github Action
-# This workflow focuses on building Box64 for Android, specifically
-# generating the .rat package for MiceWine, including variations
-# for SD888 and SD845 SoCs.
-# NOTE: Automatic builds on push commits have been disabled.
-
-name: Build and Release Box64 (MiceWine Focus)
+name: Build and Release Box64 (MiceWine)
 
 on:
   workflow_dispatch: # Allow manual triggering
@@ -38,8 +32,8 @@ jobs:
         platform: [ANDROID]
         # Only build Release and Trace types (needed for .rat)
         type: [Release, Trace]
-        # Define SoC targets: 'default' for standard build, plus specific SoCs
-        soc: [default, SD888, SD845]
+        # Define SoC targets: 'default' for standard build, plus SD888. SD845 removed.
+        soc: [default, SD888]
         # Android builds run on ubuntu-latest based on original exclude rules
         os: [ubuntu-latest]
         # No exclusions needed with this simplified matrix
