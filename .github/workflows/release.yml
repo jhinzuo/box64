@@ -1,329 +1,212 @@
-### Auto build Box64 and release its binary with Github Action
-name: Build and Release Box64
+# ### Auto build Box64 and release its binary with Github Action
+# This workflow focuses on building Box64 for Android, specifically
+# generating the .rat package for MiceWine, including variations
+# for SD888 and SD845 SoCs.
+# NOTE: Automatic builds on push commits have been disabled.
+
+name: Build and Release Box64 (MiceWine Focus)
 
 on:
-  workflow_dispatch:
-  release:
-  push:
-    paths:
-      - "**/*.c"
-      - "**/*.h"
-      - "**/*.S"
-      - "**/*.py"
-      - "CMakeLists.txt"
-      - "**/*.yml"
+  workflow_dispatch: # Allow manual triggering
+  release: # Trigger on new release creation
+    types: [published]
+  # The 'push' trigger has been removed to prevent builds on commit
+  # push:
+  #   paths: # Trigger on changes to source files or this workflow
+  #     - "**/ *.c"
+  #     - "**/ *.h"
+  #     - "**/ *.S"
+  #     - "**/ *.py"
+  #     - "CMakeLists.txt"
+  #     - ".github/workflows/**.yml"
   pull_request:
     types: [assigned, opened, synchronize, reopened]
     paths:
-      - "**/*.c"
-      - "**/*.h"
-      - "**/*.S"
-      - "**/*.py"
+      - "**/ *.c"
+      - "**/ *.h"
+      - "**/ *.S"
+      - "**/ *.py"
       - "CMakeLists.txt"
-      - "**/*.yml"
+      - ".github/workflows/**.yml"
 
 jobs:
   build:
     strategy:
-      fail-fast: false
+      fail-fast: false # Don't cancel other jobs if one fails
       matrix:
-        platform: [X64, RISCV, RK3588, ARM64, ANDROID, TERMUX, LARCH64, ANDROID_GLIBC]
-        type: [Release, Trace, StaticBuild, Box32]
-        os: [ubuntu-latest, ubuntu-22.04-arm]
-        exclude:
-          - platform: ANDROID
-            type: StaticBuild
-          - platform: TERMUX
-            type: StaticBuild
-          - platform: X64
-            type: StaticBuild
-          - platform: ANDROID
-            type: Box32
-          - platform: TERMUX
-            type: Box32
-          - platform: X64
-            os: ubuntu-22.04-arm
-          - platform: RISCV
-            os: ubuntu-22.04-arm
-          - platform: RK3588
-            os: ubuntu-latest
-          - platform: ARM64
-            os: ubuntu-latest
-          - platform: ANDROID
-            os: ubuntu-22.04-arm
-          - platform: TERMUX
-            os: ubuntu-22.04-arm
-          - platform: LARCH64
-            os: ubuntu-22.04-arm
-          - platform: ANDROID_GLIBC
-            os: ubuntu-latest
+        # Only build for ANDROID platform now
+        platform: [ANDROID]
+        # Only build Release and Trace types (needed for .rat)
+        type: [Release, Trace]
+        # Define SoC targets: 'default' for standard build, plus specific SoCs
+        soc: [default, SD888, SD845]
+        # Android builds run on ubuntu-latest based on original exclude rules
+        os: [ubuntu-latest]
+        # No exclusions needed with this simplified matrix
 
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }} # Use the OS defined in the matrix
+
     steps:
       - name: "Checkout Box64 Repository"
         uses: actions/checkout@v4
+        with:
+          # Fetch all history for version calculation if needed (optional)
+          fetch-depth: 0
 
-      - name: "Environment preparation"
+      - name: "Environment preparation for ANDROID"
+        # This step sets up the Android NDK and necessary tools
         run: |
           sudo apt-get update
-          if [[ ${{ matrix.platform }} != 'X64' && ${{ matrix.platform }} != 'RISCV' && ${{ matrix.platform }} != 'LARCH64' ]]; then
-            sudo apt-get -y install git cmake make python3 patchelf
-            if [[ ${{ matrix.platform }} == 'ANDROID' || ${{ matrix.platform }} == 'TERMUX' ]]; then
-              sudo apt-get -y install p7zip
-              wget -q https://dl.google.com/android/repository/android-ndk-r26b-linux.zip
-              unzip -qq android-ndk-r26b-linux.zip
-              echo "BOX64_COMPILER=$PWD/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang" >> $GITHUB_ENV
-              echo "BOX64_PLATFORM_MARCRO=-DANDROID=1 -DARM_DYNAREC=1 -DBAD_SIGNAL=1" >> $GITHUB_ENV
-              git clone https://github.com/termux/termux-docker.git
-              sudo cp -rf termux-docker/system/arm /system
-              sudo chown -R $(whoami):$(whoami) /system
-              sudo chmod 755 -R /system
-            elif [[ ${{ matrix.platform }} == 'ANDROID_GLIBC' ]]; then
-              sudo apt-get -y install git gcc-aarch64-linux-gnu
-              echo "BOX64_PLATFORM_MARCRO=-DARM64=1 -DWINLATOR_GLIBC=1 -DARM_DYNAREC=1 -DBAD_SIGNAL=1" >> $GITHUB_ENV
-              echo "BOX64_COMPILER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-            else
-              sudo apt-get -y install git gcc-aarch64-linux-gnu
-              echo "BOX64_PLATFORM_MARCRO=-D${{ matrix.platform }}=1" >> $GITHUB_ENV
-              echo "BOX64_COMPILER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-            fi
-            if [[ ${{ matrix.platform }} == 'TERMUX' ]]; then
-              wget https://packages.termux.dev/apt/termux-main/pool/main/liba/libandroid-sysv-semaphore/libandroid-sysv-semaphore_0.1_aarch64.deb
-              7z x libandroid-sysv-semaphore_0.1_aarch64.deb
-              tar -xf data.tar.xz
-              sudo cp -rf data /
-              sudo chmod 755 -R /data
-              sudo chown -R $(whoami):$(whoami) /data
-              echo "CFLAGS=-L/data/data/com.termux/files/usr/lib" >> $GITHUB_ENV
-              echo "IS_TERMUX=1" >> $GITHUB_ENV
-              echo "QEMU_SET_ENV=LD_LIBRARY_PATH=/data/data/com.termux/files/usr/lib" >> $GITHUB_ENV
-            else
-              echo "IS_TERMUX=0" >> $GITHUB_ENV
-            fi
-          else
-            if [[ ${{ matrix.platform }} == 'X64' ]]; then
-              echo "BOX64_PLATFORM_MARCRO=-DLD80BITS=1 -DNOALIGN=1" >> $GITHUB_ENV
-              echo "BOX64_COMPILER=gcc" >> $GITHUB_ENV
-              sudo apt-get -y install git cmake make python3
-            elif [[ ${{ matrix.platform }} == 'RISCV' ]]; then
-              echo BOX64_PLATFORM_MARCRO="-DRV64=ON" >> $GITHUB_ENV
-              echo "BOX64_COMPILER=riscv64-linux-gnu-gcc" >> $GITHUB_ENV
-              sudo apt-get -y install git gcc-riscv64-linux-gnu cmake make python3 ninja-build libglib2.0-dev
-            elif [[ ${{ matrix.platform }} == 'LARCH64' ]]; then
-              sudo mkdir /usr/local/larch
-              wget -O- -q https://github.com/loongson/build-tools/releases/download/2023.08.08/CLFS-loongarch64-8.1-x86_64-cross-tools-gcc-glibc.tar.xz | sudo tar -C /usr/local/larch --strip-components=1 --xz -xf -
-              sudo ln -sf /usr/local/larch/target /usr/loongarch64-linux-gnu
-              sudo cp -r /usr/local/larch/loongarch64-unknown-linux-gnu/lib/* /usr/loongarch64-linux-gnu/lib64/
-              for i in objdump objcopy strip; do
-                sudo ln -sf /usr/local/larch/bin/loongarch64-unknown-linux-gnu-$i /usr/bin/loongarch64-linux-gnu-$i
-              done
-              echo '/usr/local/larch/bin/loongarch64-unknown-linux-gnu-gcc -L/usr/local/larch/loongarch64-unknown-linux-gnu "$@"' | sudo tee /usr/bin/loongarch64-linux-gnu-gcc
-              echo '/usr/local/larch/bin/loongarch64-unknown-linux-gnu-g++ -L/usr/local/larch/loongarch64-unknown-linux-gnu "$@"' | sudo tee /usr/bin/loongarch64-linux-gnu-g++
-              sudo chmod 755 /usr/bin/loongarch64-linux-gnu-{gcc,g++}
+          sudo apt-get -y install git cmake make python3 p7zip patchelf
 
-              echo BOX64_PLATFORM_MARCRO="-DLARCH64=ON" >> $GITHUB_ENV
-              echo "BOX64_COMPILER=loongarch64-linux-gnu-gcc" >> $GITHUB_ENV
-              sudo apt-get -y install git cmake make python3
-            else
-              echo BOX64_PLATFORM_MARCRO="-DARM_DYNAREC=ON" >> $GITHUB_ENV
-              echo "BOX64_COMPILER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-              sudo apt-get -y install git gcc-aarch64-linux-gnu cmake make python3
-            fi
-          fi
-          if [[ ${{ matrix.type }} == 'Release' ]]; then
+          # Download and extract Android NDK
+          wget -q https://dl.google.com/android/repository/android-ndk-r26b-linux.zip
+          unzip -qq android-ndk-r26b-linux.zip
+
+          # Set environment variables for the NDK compiler and platform flags
+          echo "BOX64_COMPILER=$PWD/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang" >> $GITHUB_ENV
+          # Base flags for Android platform
+          echo "BOX64_PLATFORM_MARCRO=-DANDROID=1 -DARM_DYNAREC=1 -DBAD_SIGNAL=1" >> $GITHUB_ENV
+
+          # Clone termux-docker to get system libraries (as per original workflow for Android)
+          # Note: Ensure this step is actually required for your non-Termux Android build
+          git clone https://github.com/termux/termux-docker.git
+          sudo cp -rf termux-docker/system/arm /system
+          sudo chown -R $(whoami):$(whoami) /system
+          sudo chmod 755 -R /system
+
+          # Set TERMUX flag to 0 as this is not a Termux build
+          echo "IS_TERMUX=0" >> $GITHUB_ENV
+
+      - name: "Set Build Type Flags"
+        # Sets CMake flags based on the build type (Release/Trace)
+        run: |
+          if [[ "${{ matrix.type }}" == 'Release' ]]; then
             echo BOX64_BUILD_TYPE=Release >> $GITHUB_ENV
             echo BOX64_HAVE_TRACE=0 >> $GITHUB_ENV
-            echo BOX64_STATICBUILD=0 >> $GITHUB_ENV
-            echo BOX64_BOX32=0 >> $GITHUB_ENV
-          elif [[ ${{ matrix.type }} == 'StaticBuild' ]]; then
-            echo BOX64_BUILD_TYPE=Release >> $GITHUB_ENV
-            echo BOX64_HAVE_TRACE=0 >> $GITHUB_ENV
-            echo BOX64_STATICBUILD=1 >> $GITHUB_ENV
-            echo BOX64_BOX32=0 >> $GITHUB_ENV
-          elif [[ ${{ matrix.type }} == 'Box32' ]]; then
-            echo BOX64_BUILD_TYPE=Release >> $GITHUB_ENV
-            echo BOX64_HAVE_TRACE=0 >> $GITHUB_ENV
-            echo BOX64_STATICBUILD=0 >> $GITHUB_ENV
-            echo BOX64_BOX32=1 >> $GITHUB_ENV
-          else
-            echo BOX64_BUILD_TYPE=RelWithDebInfo >> $GITHUB_ENV
+            echo BOX64_STATICBUILD=0 >> $GITHUB_ENV # StaticBuild not used
+            echo BOX64_BOX32=0 >> $GITHUB_ENV # Box32 not used
+          else # Trace build
+            echo BOX64_BUILD_TYPE=RelWithDebInfo >> $GITHUB_ENV # Use RelWithDebInfo for Trace
             echo BOX64_HAVE_TRACE=1 >> $GITHUB_ENV
             echo BOX64_STATICBUILD=0 >> $GITHUB_ENV
             echo BOX64_BOX32=0 >> $GITHUB_ENV
           fi
 
-      - name: "Get XuanTie QEMU Cache Key"
-        if: matrix.platform == 'RISCV'
-        id: get-xuantie-qemu-cache-key
+      - name: "Set SoC Flag"
+        # Sets the specific SoC CMake flag if not 'default'
         run: |
-          echo "key=f2dfdd13014d51f957c7172acc2e791cb42dc400" >> $GITHUB_OUTPUT
-
-      - name: "Cache XuanTie QEMU"
-        if: matrix.platform == 'RISCV'
-        id: cache-xuantie-qemu
-        uses: actions/cache@v3
-        with:
-          path: ${{ github.workspace }}/xuantie_qemu_install
-          key: ${{ runner.os }}-${{ steps.get-xuantie-qemu-cache-key.outputs.key }}-xuantie-qemu
-
-      - name: "Checkout XuanTie QEMU"
-        if: matrix.platform == 'RISCV' && steps.cache-xuantie-qemu.outputs.cache-hit != 'true'
-        uses: actions/checkout@v3
-        with:
-          repository: revyos/qemu
-          path: xuantie_qemu
-          ref: f2dfdd13014d51f957c7172acc2e791cb42dc400
-
-      - name: "Build XuanTie QEMU for XTheadVector"
-        if: matrix.platform == 'RISCV' && steps.cache-xuantie-qemu.outputs.cache-hit != 'true'
-        run: |
-          cd xuantie_qemu
-          ./configure --prefix=$GITHUB_WORKSPACE/xuantie_qemu_install --target-list=riscv64-linux-user --disable-system
-          make -j$(nproc)
-          make install
+          if [[ "${{ matrix.soc }}" != "default" ]]; then
+            echo "BOX64_SOC_FLAG=-D${{ matrix.soc }}=1" >> $GITHUB_ENV
+            echo "SOC_SUFFIX=${{ matrix.soc }}-" >> $GITHUB_ENV # Suffix for artifact name
+          else
+            echo "BOX64_SOC_FLAG=" >> $GITHUB_ENV # No extra flag for default
+            echo "SOC_SUFFIX=" >> $GITHUB_ENV # No suffix for default
+          fi
 
       - name: "Display Build info"
+        # Log the configuration being built
         run: |
-          echo "CMake Platform Macro: ${{ env.BOX64_PLATFORM_MARCRO }}"
-          echo "CMake C Compiler: ${{ env.BOX64_COMPILER }}"
-          echo "Build type: ${{ env.BOX64_BUILD_TYPE }}"
+          echo "Platform: ${{ matrix.platform }}"
+          echo "Type: ${{ matrix.type }}"
+          echo "SoC Target: ${{ matrix.soc }}"
+          echo "OS: ${{ matrix.os }}"
+          echo "--- CMake Flags ---"
+          echo "Platform Macro: ${{ env.BOX64_PLATFORM_MARCRO }}"
+          echo "SoC Flag: ${{ env.BOX64_SOC_FLAG }}"
+          echo "Compiler: ${{ env.BOX64_COMPILER }}"
+          echo "Build Type: ${{ env.BOX64_BUILD_TYPE }}"
           echo "Trace Enabled: ${{ env.BOX64_HAVE_TRACE }}"
           echo "StaticBuild Enabled: ${{ env.BOX64_STATICBUILD }}"
           echo "Box32 Enabled: ${{ env.BOX64_BOX32 }}"
+          echo "Termux Build: ${{ env.IS_TERMUX }}"
+          echo "CI Flag: false (Android)"
 
       - name: "Build Box64"
+        # Run CMake and Make to build the executable
         run: |
           mkdir build
           cd build
-          cmake .. -DCMAKE_C_COMPILER=${{ env.BOX64_COMPILER }}\
-                   -DTERMUX=${{ env.IS_TERMUX }}\
-                   ${{ env.BOX64_PLATFORM_MARCRO }}\
-                   -DCMAKE_BUILD_TYPE=${{ env.BOX64_BUILD_TYPE }}\
-                   -DHAVE_TRACE=${{ env.BOX64_HAVE_TRACE }}\
-                   -DSTATICBUILD=${{ env.BOX64_STATICBUILD }}\
-                   -DBOX32=${{ env.BOX64_BOX32 }}\
-                   -DCMAKE_VERBOSE_MAKEFILE:BOOL=ON\
-                   -DCI=${{ matrix.platform != 'ANDROID' }}
+          # Construct the CMake command with all flags
+          cmake .. -DCMAKE_C_COMPILER=${{ env.BOX64_COMPILER }} \
+                   -DTERMUX=${{ env.IS_TERMUX }} \
+                   ${{ env.BOX64_PLATFORM_MARCRO }} \
+                   ${{ env.BOX64_SOC_FLAG }} \
+                   -DCMAKE_BUILD_TYPE=${{ env.BOX64_BUILD_TYPE }} \
+                   -DHAVE_TRACE=${{ env.BOX64_HAVE_TRACE }} \
+                   -DSTATICBUILD=${{ env.BOX64_STATICBUILD }} \
+                   -DBOX32=${{ env.BOX64_BOX32 }} \
+                   -DCMAKE_VERBOSE_MAKEFILE:BOOL=ON \
+                   -DCI=false # CI flag is false for Android builds
+          # Build using all available processor cores
           make -j$(nproc) VERBOSE=1
 
-      - name: "Test Box64"
+      - name: "Test Box64 (Android)"
+        # Run tests using QEMU for the Android build
         run: |
-          if [[ ${{ matrix.platform }} != 'X64' ]]; then
-            mkdir qemu9
-            wget -O- -q https://archive.archlinux.org/packages/q/qemu-user-static/qemu-user-static-9.0.2-1-x86_64.pkg.tar.zst | tar -I zstd -C qemu9 -xf -
-            sudo cp qemu9/usr/bin/* /usr/bin/
-          fi
+          # Install QEMU static user emulator for aarch64
+          mkdir qemu9
+          wget -O- -q https://archive.archlinux.org/packages/q/qemu-user-static/qemu-user-static-9.0.2-1-x86_64.pkg.tar.zst | tar -I zstd -C qemu9 -xf -
+          sudo cp qemu9/usr/bin/qemu-aarch64-static /usr/bin/
 
           cd build
+          # Set QEMU environment variables for Android libraries
+          export INTERPRETER=qemu-aarch64-static
+          export QEMU_LD_PREFIX=/system/lib64 # Path to Android libs copied earlier
+
+          # Set CTest options
           export CTEST_OPTIONS="-j$(nproc) --timeout 120 --output-on-failure --repeat until-pass:20"
-          if [[ ${{ matrix.platform }} == 'RISCV' ]]; then
-            export INTERPRETER=qemu-riscv64-static
-            export QEMU_LD_PREFIX=/usr/riscv64-linux-gnu/
 
-            ctest $CTEST_OPTIONS
-            QEMU_CPU=rv64,v=false BOX64_DYNAREC=0 ctest $CTEST_OPTIONS
-            QEMU_CPU=rv64,v=false,zba=true,zbb=true,zbc=true,zbs=true ctest $CTEST_OPTIONS
-            QEMU_CPU=rv64,v=true,vlen=128,vext_spec=v1.0 ctest $CTEST_OPTIONS
-            QEMU_CPU=rv64,v=true,vlen=256,vext_spec=v1.0 ctest $CTEST_OPTIONS
-            QEMU_CPU=thead-c906 ctest $CTEST_OPTIONS
-
-            BOX64_DYNAREC_TEST=1 ctest $CTEST_OPTIONS -E nocosim
-            BOX64_DYNAREC_TEST=1 QEMU_CPU=rv64,v=false,zba=true,zbb=true,zbc=true,zbs=true ctest $CTEST_OPTIONS -E nocosim
-            BOX64_DYNAREC_TEST=1 QEMU_CPU=rv64,v=true,vlen=128,vext_spec=v1.0 ctest $CTEST_OPTIONS -E nocosim
-            BOX64_DYNAREC_TEST=1 QEMU_CPU=rv64,v=true,vlen=256,vext_spec=v1.0 ctest $CTEST_OPTIONS -E nocosim
-            BOX64_DYNAREC_TEST=1 QEMU_CPU=thead-c906 ctest $CTEST_OPTIONS -E nocosim
-
-            export INTERPRETER=$GITHUB_WORKSPACE/xuantie_qemu_install/bin/qemu-riscv64
-            QEMU_CPU=c910v ctest $CTEST_OPTIONS
-            BOX64_DYNAREC_TEST=1 QEMU_CPU=c910v ctest $CTEST_OPTIONS -E nocosim
-          elif [[ ${{ matrix.platform }} == 'LARCH64' ]]; then
-            export INTERPRETER=qemu-loongarch64-static
-            export QEMU_LD_PREFIX=/usr/loongarch64-linux-gnu/
-
-            BOX64_DYNAREC_LA64NOEXT=1 ctest $CTEST_OPTIONS -E nocosim
-            BOX64_DYNAREC=0 ctest $CTEST_OPTIONS -E nocosim
-
-            BOX64_DYNAREC_TEST=1 BOX64_DYNAREC_LA64NOEXT=1 ctest $CTEST_OPTIONS -E nocosim
-          elif [[ ${{ matrix.platform }} == 'ANDROID' ]]; then
-            export INTERPRETER=qemu-aarch64-static
-            export QEMU_LD_PREFIX=/system/lib64
-            
-            BOX64_DYNAREC=0 ctest $CTEST_OPTIONS
-            ctest $CTEST_OPTIONS
-          elif [[ ${{ matrix.platform }} == 'TERMUX' ]]; then
-            export INTERPRETER=qemu-aarch64-static
-            export QEMU_SET_ENV=LD_LIBRARY_PATH=/data/data/com.termux/files/usr/lib 
-            export QEMU_LD_PREFIX=/system/lib64:/data/data/com.termux/files/usr/lib
-
-            BOX64_DYNAREC=0 ctest $CTEST_OPTIONS
-            ctest $CTEST_OPTIONS
-          elif [[ ${{matrix.type}} == 'Box32' ]]; then
-            ctest $CTEST_OPTIONS
-          else
-            ctest -j$(nproc)
-          fi
+          # Run tests with Dynarec OFF first
+          BOX64_DYNAREC=0 ctest $CTEST_OPTIONS
+          # Run tests with Dynarec ON (default)
+          ctest $CTEST_OPTIONS
 
       - name: "Get short Git commit"
+        # Get the short commit hash for artifact naming
         id: git-info
         run: echo "SHORT_COMMIT=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
 
       - name: "Get Box64 Version"
+        # Extract Box64 version from header file
         run: echo "BOX64_VERSION=$(cat src/box64version.h | grep BOX64_MAJOR | cut -d " " -f 3).$(cat src/box64version.h | grep BOX64_MINOR | cut -d " " -f 3).$(cat src/box64version.h | grep BOX64_REVISION | cut -d " " -f 3)" >> $GITHUB_ENV
 
-      - name: "Packaging WCP file for Winlator"
-        if: matrix.platform == 'ANDROID_GLIBC' && matrix.type != 'StaticBuild'
-        run: |
-          cd build
-          cat <<EOF > profile.json
-          {
-            "type": "Box64",
-            "versionName": "latest-${SHORT_COMMIT}",
-            "versionCode": 1,
-            "description": "Box64-latest-${SHORT_COMMIT}. Built from [https://github.com/ptitSeb/box64].",
-            "files": [
-              {
-                "source": "box64",
-                "target": "\${localbin}/box64"
-              }
-            ]
-          }
-          EOF
-          patchelf --set-interpreter /data/data/com.winlator/files/imagefs/usr/lib/ld-linux-aarch64.so.1 ./box64
-          tar --zstd -cf box64-latest.wcp box64 profile.json
-
       - name: "Package Rat File for MiceWine"
+        # This step creates the .rat package if the build type is Release or Trace
+        # The condition `matrix.type != 'StaticBuild'` is always true now, but kept for clarity
         if: matrix.platform == 'ANDROID' && matrix.type != 'StaticBuild'
         run: |
           cd build
-
+          # Create directory structure for the package
           mkdir -p files/usr/bin
-
+          # Copy the built executable
           cp box64 files/usr/bin
 
-          echo "name=Box64 (CI Build)" > pkg-header
+          # Create the package header file
+          echo "name=Box64 (CI Build - ${{ env.SOC_SUFFIX }}${{ matrix.type }})" > pkg-header
           echo "category=Box64" >> pkg-header
-          echo "version=${BOX64_VERSION}-${SHORT_COMMIT}" >> pkg-header
+          echo "version=${{ env.BOX64_VERSION }}-${{ env.SHORT_COMMIT }}" >> pkg-header
           echo "architecture=aarch64" >> pkg-header
-          echo "vkDriverLib=" >> pkg-header
+          echo "vkDriverLib=" >> pkg-header # Placeholder for Vulkan driver if needed
 
-          7z -tzip -mx=5 a box64-latest.rat files pkg-header
+          # Create the .rat file (zip archive)
+          7z -tzip -mx=5 a box64-${{ env.SOC_SUFFIX }}${{ matrix.type }}.rat files pkg-header
 
-      - name: "Upload Artifact"
+      - name: "Upload Box64 Executable Artifact"
+        # Upload the raw executable as a separate artifact
         uses: actions/upload-artifact@v4
         with:
-          name: box64-${{ matrix.platform }}-${{ matrix.type }}
+          # Name includes SoC target and build type
+          name: box64-${{ matrix.platform }}-${{ env.SOC_SUFFIX }}${{ matrix.type }}
           path: build/box64
 
-      - name: "Upload WCP file"
-        if: matrix.platform == 'ANDROID_GLIBC' && matrix.type != 'StaticBuild'
-        uses: actions/upload-artifact@v4
-        with:
-          name: box64-latest-${{ matrix.type }}-wcp
-          path: build/box64-latest.wcp
-
-      - name: "Upload Rat File"
+      - name: "Upload Rat File Artifact"
+        # Upload the generated .rat file for MiceWine
+        # Condition ensures this only runs for Android Release/Trace builds
         if: matrix.platform == 'ANDROID' && matrix.type != 'StaticBuild'
         uses: actions/upload-artifact@v4
         with:
-          name: box64-MiceWine-${{ matrix.type }}
-          path: build/box64-latest.rat
+          # Name includes SoC target and build type
+          name: box64-MiceWine-${{ env.SOC_SUFFIX }}${{ matrix.type }}
+          path: build/box64-${{ env.SOC_SUFFIX }}${{ matrix.type }}.rat
+
