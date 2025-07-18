@@ -198,7 +198,8 @@ elseif(SD8G2)
     set(CFLAGS -pipe -march=armv9-a+i8mm+sm4+sha3+rcpc+crypto+nosve+nosve2 -mtune=cortex-x3)
 elseif(SD8G3)
     add_definitions(-DSD8G3)
-    set(CFLAGS -pipe -march=armv9.2-a+i8mm+sm4+sha3+rcpc+crypto -mtune=cortex-x4)
+    #cortex-x4 not supported mtune yet as we are still using Clang17 fallback to cortex-x3
+    set(CFLAGS -pipe -march=armv9.2-a+i8mm+sm4+sha3+rcpc+crypto -mtune=cortex-x3)
 elseif(EXYNOS2200)
     add_definitions(-DEXYNOS2200)
     set(CFLAGS -pipe -march=armv9-a+i8mm+sm4+sha3+rcpc+crypto -mtune=cortex-x2) # Replace xxx with additonal extensions
