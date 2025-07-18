@@ -19,7 +19,7 @@ option(PHYTIUM "Set to ON if targeting an Phytium (D2000 or FT2000/4) based devi
 option(SD845 "Set to ON if targeting a Snapragon 845 based device" ${SD845})
 option(SD865 "Set to ON if targeting a Snapragon 865 based device" ${SD865})
 option(SD888 "Set to ON if targeting a Snapragon 888 based device" ${SD888})
-option(SD8G2 "Set to ON if targeting a Snapragon 7+Gen 2 based device" ${SD7+G2})
+option(SD7+G2 "Set to ON if targeting a Snapragon 7+Gen 2 based device" ${SD7+G2})
 option(SD8G2 "Set to ON if targeting a Snapragon 8 Gen 2 based device" ${SD8G2})
 option(SD8G3 "Set to ON if targeting a Snapragon 8 Gen 3 based device" ${SD8G3})
 option(EXYNOS2200 "Set to ON if targeting a Exynos 2200 based device" ${EXYNOS2200})
