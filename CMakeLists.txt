@@ -19,7 +19,10 @@ option(PHYTIUM "Set to ON if targeting an Phytium (D2000 or FT2000/4) based devi
 option(SD845 "Set to ON if targeting a Snapragon 845 based device" ${SD845})
 option(SD865 "Set to ON if targeting a Snapragon 865 based device" ${SD865})
 option(SD888 "Set to ON if targeting a Snapragon 888 based device" ${SD888})
+option(SD8G2 "Set to ON if targeting a Snapragon 7+Gen 2 based device" ${SD7+G2})
 option(SD8G2 "Set to ON if targeting a Snapragon 8 Gen 2 based device" ${SD8G2})
+option(SD8G3 "Set to ON if targeting a Snapragon 8 Gen 3 based device" ${SD8G3})
+option(EXYNOS2200 "Set to ON if targeting a Exynos 2200 based device" ${EXYNOS2200})
 option(SDORYON1 "Set to ON if targeting a Snapdragon Oryon 1 (X1E80100/X1E78100) based device" ${SDORYON1})
 option(ADLINK "Set to ON if targeting an ADLink AmpereAltra based device" ${ADLINK})
 option(M1 "Set to ON if targeting a AppleM1 running on Asahi computer" ${M1})
@@ -32,7 +35,8 @@ option(ANDROID "Set to ON if targeting an Android device" ${ANDROID})
 option(TERMUX "Set to ON if targeting an Android device with Termux" ${TERMUX})
 option(WINLATOR_GLIBC "Set to ON if targeting an Android device with Winlator Glibc" ${WINLATOR_GLIBC})
 option(USE_CCACHE "Set to ON to use ccache if present in the system" ${USE_CCACHE})
-option(HAVE_TRACE "Set to ON to have Trace ability (needs ZydisInfo library)" ${HAVE_TRACE})
+option(HAVE_TRACE "Set to ON to have Trace ability (needs libzydis-dev)" ${HAVE_TRACE})
+option(ZYDIS3 "Set to ON if you have trace and an old libzydis v3.x" ${ZYDIS3})
 option(SAVE_MEM "Set to ON to build dynarec with some slower memory saving optimizations" ${SAVE_MEM})
 option(NOLOADADDR "Set to ON to avoid fixing the load address of Box64" OFF)
 option(NOGIT "Set to ON if not building from a git clone repo (like when building from a zip download from github)" ${NOGIT})
@@ -50,6 +54,15 @@ if(TERMUX)
     set(TERMUX_PATH "/data/data/com.termux/files")
     set(ANDROID ON CACHE BOOL "")
 endif()
+
+# Hack: limit the optimization level to -O1 for some platforms
+if(TERMUX OR ANDROID)
+    set(CMAKE_C_FLAGS_RELEASE "-O1")
+    set(CMAKE_CXX_FLAGS_RELEASE "-O1")
+    set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O1 -g")
+    set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O1 -g")
+endif()
+
 if(LARCH64)
     set(LD80BITS OFF CACHE BOOL "")
     set(NOALIGN OFF CACHE BOOL "")
@@ -186,9 +199,18 @@ elseif(SD865)
 elseif(SD888)
     add_definitions(-DSD888)
     set(CFLAGS -pipe -march=armv8.4-a+simd+crypto)
+elseif(SD7+G2)
+    add_definitions(-SD7+G2)
+    set(CLFAGS -pipe -march=armv9-a+i8mm+sm4+sha3+rcpc+crypto+nosve+nosve2 -mtune=cortex-x2)
 elseif(SD8G2)
     add_definitions(-DSD8G2)
-    set(CFLAGS -pipe -march=armv9-a+i8mm+sm4+sha3+rcpc+crypto+nosve+nosve2)
+    set(CFLAGS -pipe -march=armv9-a+i8mm+sm4+sha3+rcpc+crypto+nosve+nosve2 -mtune=cortex-x3)
+elseif(SD8G3)
+    add_definitions(-DSD8G3)
+    add(CFLAGS -pipe -march=armv9.2-a+i8mm+sm4+sha3+rcpc+crypto -mtune=cortex.x4)
+elseif(EXYNOS2200)
+    add_definitions(-DEXYNOS2200)
+    set(CFLAGS -pipe -march=armv9-a+i8mm+sm4+sha3+rcpc+crypto -mtune=cortex-x2) # Replace xxx with additonal extensions
 elseif(SDORYON1)
     add_definitions(-DSDORYON1)
     # NOTE
@@ -294,6 +316,10 @@ if(HAVE_TRACE)
     add_definitions(-DHAVE_TRACE)
 endif()
 
+if(ZYDIS3)
+    add_definitions(-DZYDIS3)
+endif()
+
 if(ARM_DYNAREC)
     add_definitions(-DDYNAREC)
     add_definitions(-DARM64)
@@ -350,6 +376,8 @@ set_source_files_properties(
 set(OS_LINUX_SRC
     "${BOX64_ROOT}/src/os/backtrace.c"
     "${BOX64_ROOT}/src/os/emit_signals_linux.c"
+    "${BOX64_ROOT}/src/os/hostext_common.c"
+    "${BOX64_ROOT}/src/os/hostext_linux.c"
     "${BOX64_ROOT}/src/os/freq_linux.c"
     "${BOX64_ROOT}/src/os/os_linux.c"
     "${BOX64_ROOT}/src/os/perfmap.c"
@@ -456,6 +484,7 @@ set(INTERPRETER
     "${BOX64_ROOT}/src/emu/x64run.c"
     "${BOX64_ROOT}/src/emu/x64run0f.c"
     "${BOX64_ROOT}/src/emu/x64run64.c"
+    "${BOX64_ROOT}/src/emu/x64run64avx.c"
     "${BOX64_ROOT}/src/emu/x64run66.c"
     "${BOX64_ROOT}/src/emu/x64run660f.c"
     "${BOX64_ROOT}/src/emu/x64run66f20f.c"
@@ -911,6 +940,7 @@ if(DYNAREC)
         "${BOX64_ROOT}/src/dynarec/dynablock.c"
         "${BOX64_ROOT}/src/dynarec/dynarec_native.c"
         "${BOX64_ROOT}/src/dynarec/dynarec_native_functions.c"
+        "${BOX64_ROOT}/src/dynarec/dynacache_reloc.c"
         "${BOX64_ROOT}/src/emu/x64test.c"
     )
 endif()
@@ -924,6 +954,7 @@ if(ARM_DYNAREC)
         "${BOX64_ROOT}/src/dynarec/arm64/arm64_immenc.c"
         "${BOX64_ROOT}/src/dynarec/arm64/arm64_printer.c"
         "${BOX64_ROOT}/src/dynarec/arm64/dynarec_arm64_jmpnext.c"
+        "${BOX64_ROOT}/src/dynarec/arm64/dynarec_arm64_consts.c"
     )
     set(DYNAREC_ASM
         ${DYNAREC_ASM}
@@ -947,6 +978,7 @@ if(ARM_DYNAREC)
     "${BOX64_ROOT}/src/dynarec/arm64/dynarec_arm64_67.c"
     "${BOX64_ROOT}/src/dynarec/arm64/dynarec_arm64_67_32.c"
     "${BOX64_ROOT}/src/dynarec/arm64/dynarec_arm64_67_avx.c"
+    "${BOX64_ROOT}/src/dynarec/arm64/dynarec_arm64_6764.c"
     "${BOX64_ROOT}/src/dynarec/arm64/dynarec_arm64_6764_32.c"
     "${BOX64_ROOT}/src/dynarec/arm64/dynarec_arm64_d8.c"
     "${BOX64_ROOT}/src/dynarec/arm64/dynarec_arm64_d9.c"
@@ -986,7 +1018,7 @@ if(RV64_DYNAREC)
         "${BOX64_ROOT}/src/dynarec/rv64/dynarec_rv64_arch.c"
         "${BOX64_ROOT}/src/dynarec/rv64/rv64_printer.c"
         "${BOX64_ROOT}/src/dynarec/rv64/dynarec_rv64_jmpnext.c"
-        "${BOX64_ROOT}/src/rv64detect.c"
+        "${BOX64_ROOT}/src/dynarec/rv64/dynarec_rv64_consts.c"
         )
     set(DYNAREC_ASM
         ${DYNAREC_ASM}
@@ -1047,6 +1079,7 @@ if(LARCH64_DYNAREC)
         "${BOX64_ROOT}/src/dynarec/la64/dynarec_la64_functions.c"
         "${BOX64_ROOT}/src/dynarec/la64/la64_printer.c"
         "${BOX64_ROOT}/src/dynarec/la64/dynarec_la64_jmpnext.c"
+        "${BOX64_ROOT}/src/dynarec/la64/dynarec_la64_consts.c"
     )
     set(DYNAREC_ASM
         ${DYNAREC_ASM}
@@ -1075,6 +1108,17 @@ if(LARCH64_DYNAREC)
     "${BOX64_ROOT}/src/dynarec/la64/dynarec_la64_f0.c"
     "${BOX64_ROOT}/src/dynarec/la64/dynarec_la64_f20f.c"
     "${BOX64_ROOT}/src/dynarec/la64/dynarec_la64_f30f.c"
+    "${BOX64_ROOT}/src/dynarec/la64/dynarec_la64_avx.c"
+    "${BOX64_ROOT}/src/dynarec/la64/dynarec_la64_avx_0f.c"
+    "${BOX64_ROOT}/src/dynarec/la64/dynarec_la64_avx_0f38.c"
+    "${BOX64_ROOT}/src/dynarec/la64/dynarec_la64_avx_66_0f.c"
+    "${BOX64_ROOT}/src/dynarec/la64/dynarec_la64_avx_66_0f38.c"
+    "${BOX64_ROOT}/src/dynarec/la64/dynarec_la64_avx_66_0f3a.c"
+    "${BOX64_ROOT}/src/dynarec/la64/dynarec_la64_avx_f2_0f.c"
+    "${BOX64_ROOT}/src/dynarec/la64/dynarec_la64_avx_f2_0f38.c"
+    "${BOX64_ROOT}/src/dynarec/la64/dynarec_la64_avx_f2_0f3a.c"
+    "${BOX64_ROOT}/src/dynarec/la64/dynarec_la64_avx_f3_0f.c"
+    "${BOX64_ROOT}/src/dynarec/la64/dynarec_la64_avx_f3_0f38.c"
     )
 endif()
 
@@ -1341,12 +1385,13 @@ if(WOW64 AND ARM_DYNAREC)
     include(ExternalProject)
     ExternalProject_Add(
         wowbox64
-        SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/wow64"
+        SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/wine/wow64"
         CMAKE_ARGS 
-            -DCMAKE_TOOLCHAIN_FILE=${CMAKE_CURRENT_SOURCE_DIR}/wow64/toolchain_mingw.cmake
+            -DCMAKE_TOOLCHAIN_FILE=${CMAKE_CURRENT_SOURCE_DIR}/wine/toolchain_mingw.cmake
             -DDYNAREC_PASS_STR=${DYNAREC_PASS_STR}
             -DDYNAREC_ASM_STR=${DYNAREC_ASM_STR}
             -DINTERPRETER_STR=${INTERPRETER_STR}
+            -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
         INSTALL_COMMAND ""
         TEST_COMMAND ""
         BUILD_ALWAYS ON
