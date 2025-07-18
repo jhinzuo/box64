@@ -185,8 +185,8 @@ elseif(SD845)
     set(CFLAGS -pipe -march=armv8.2-a+simd+crypto -mtune=cortex-a75.cortex-a55)
 elseif(SD865)
     add_definitions(-DSD865)
-    #note that cortex-a77.cortex-a55 is not supported, so fall back to a76 instead
-    set(CFLAGS -pipe -march=armv8.2-a+simd+crypto -mtune=cortex-a76.cortex-a55)
+    #note that cortex-a77.cortex-a55 is not supported, so fall back to a76 instead; a76.c-a55 seems unsupported now aswell according to my logs fallback to a77 tuning without big.LITTLE
+    set(CFLAGS -pipe -march=armv8.2-a+simd+crypto -mtune=cortex-a77)
 elseif(SD888)
     add_definitions(-DSD888)
     set(CFLAGS -pipe -march=armv8.4-a+simd+crypto)
