@@ -1,4 +1,4 @@
-### Auto build Box64 and release its binary with Github Action
+### Auto build Box64 and release its binary with Github Actions
 name: Build and Release Box64
 
 on:
