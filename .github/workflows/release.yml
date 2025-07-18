@@ -81,7 +81,7 @@ jobs:
               wget -q https://dl.google.com/android/repository/android-ndk-r26b-linux.zip
               unzip -qq android-ndk-r26b-linux.zip
               echo "BOX64_COMPILER=$PWD/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang" >> $GITHUB_ENV
-              echo "BOX64_PLATFORM_MARCRO=-DANDROID=1 -DARM_DYNAREC=1 -DBAD_SIGNAL=1 -DSD8G3=1" >> $GITHUB_ENV
+              echo "BOX64_PLATFORM_MARCRO=-DANDROID=1 -DARM_DYNAREC=1 -DBAD_SIGNAL=1 -DSD8G2=1" >> $GITHUB_ENV
               git clone https://github.com/termux/termux-docker.git
               sudo cp -rf termux-docker/system/arm /system
               sudo chown -R $(whoami):$(whoami) /system
