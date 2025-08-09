@@ -57,6 +57,18 @@ uintptr_t dynarec64_AVX_66_0F38(dynarec_la64_t* dyn, uintptr_t addr, uintptr_t i
     rex_t rex = vex.rex;
 
     switch (opcode) {
+        case 0x00:
+            INST_NAME("VPSHUFB Gx, Vx, Ex");
+            nextop = F8;
+            GETGY_empty_VYEY_xy(v0, v1, v2, 0);
+            q0 = fpu_get_scratch(dyn);
+            q1 = fpu_get_scratch(dyn);
+            VLDIxy(q0, 0b0000010001111); // broadcast 0b10001111 as byte
+            VAND_Vxy(q0, q0, v2);
+            VMINIxy(BU, q0, q0, 0x1f);
+            VXOR_Vxy(q1, q1, q1);
+            VSHUF_Bxy(v0, q1, v1, q0);
+            break;
         case 0x01:
             INST_NAME("VPHADDW Gx, Vx, Ex");
             nextop = F8;
@@ -171,27 +183,149 @@ uintptr_t dynarec64_AVX_66_0F38(dynarec_la64_t* dyn, uintptr_t addr, uintptr_t i
                 XVPERMI_D(v0, q0, 0b1000);
             }
             break;
+        case 0x0C:
+            INST_NAME("VPERMILPS Gx, Vx, Ex");
+            nextop = F8;
+            GETGY_empty_VYEY_xy(v0, v1, v2, 0);
+            d0 = fpu_get_scratch(dyn);
+            VANDIxy(d0, v2, 0b11);
+            VSHUFxy(W, d0, v1, v1);
+            VOR_Vxy(v0, d0, d0);
+            break;
+        case 0x0D:
+            INST_NAME("VPERMILPD Gx, Vx, Ex");
+            nextop = F8;
+            GETGY_empty_VYEY_xy(v0, v1, v2, 0);
+            d0 = fpu_get_scratch(dyn);
+            VSRLIxy(D, d0, v2, 0x1);
+            VANDIxy(d0, d0, 0b1);
+            VSHUFxy(D, d0, v2, v1);
+            VOR_Vxy(v0, d0, d0);
+            break;
+        case 0x0E:
+        case 0x0F:
+            if (opcode == 0x0E) {
+                INST_NAME("VTESTPS Gx, Ex");
+            } else {
+                INST_NAME("VTESTPD Gx, Ex");
+            }
+            nextop = F8;
+            SETFLAGS(X_ALL, SF_SET, NAT_FLAGS_NOFUSION);
+            GETGYxy(q0, 0);
+            GETEYxy(q1, 0, 0);
+            if (!cpuext.lbt) {
+                CLEAR_FLAGS(x3);
+            } else IFX (X_ALL) {
+                X64_SET_EFLAGS(xZR, X_ALL);
+            }
+            SET_DFNONE();
+            v0 = fpu_get_scratch(dyn);
+            IFX (X_ZF) {
+                VAND_Vxy(v0, q1, q0);
+                if (opcode == 0x0E) {
+                    VMSKLTZxy(W, v0, v0);
+                } else {
+                    VMSKLTZxy(D, v0, v0);
+                }
+                VSETEQZ_Vxy(fcc0, v0);
+                BCEQZ_MARK(fcc0);
+                if (cpuext.lbt) {
+                    ADDI_D(x3, xZR, 1 << F_ZF);
+                    X64_SET_EFLAGS(x3, X_ZF);
+                } else {
+                    ORI(xFlags, xFlags, 1 << F_ZF);
+                }
+            }
+            MARK;
+            IFX (X_CF) {
+                VANDN_Vxy(v0, q0, q1);
+                if (opcode == 0x0E) {
+                    VMSKLTZxy(W, v0, v0);
+                } else {
+                    VMSKLTZxy(D, v0, v0);
+                }
+                VSETEQZ_Vxy(fcc0, v0);
+                BCEQZ_MARK2(fcc0);
+                if (cpuext.lbt) {
+                    ADDI_D(x3, xZR, 1 << F_CF);
+                    X64_SET_EFLAGS(x3, X_CF);
+                } else {
+                    ORI(xFlags, xFlags, 1 << F_CF);
+                }
+            }
+            MARK2;
+            break;
+        case 0x13:
+            INST_NAME("VCVTPH2PS Gx, Ex");
+            nextop = F8;
+            GETEYSD(v1, 0, 0);
+            GETGYxy_empty(v0);
+            d0 = fpu_get_scratch(dyn);
+            if(vex.l) {
+                XVFCVTH_S_H(d0, v1);
+                XVFCVTL_S_H(v0, v1);
+                XVPERMI_Q(v0, d0, XVPERMI_IMM_4_0(0, 2));
+            } else {
+                VFCVTL_S_H(v0, v1);
+            }
+            break;
+        case 0x16:
+            INST_NAME("VPERMPS Gx, Vx, Ex");
+            nextop = F8;
+            GETGY_empty_VYEY_xy(v0, v1, v2, 0);
+            XVPERM_W(v0, v2, v1);
+            break;
+        case 0x17:
+            INST_NAME("VPTEST Gx, Ex");
+            nextop = F8;
+            SETFLAGS(X_ALL, SF_SET, NAT_FLAGS_NOFUSION);
+            GETGYxy(q0, 0);
+            GETEYxy(q1, 0, 0);
+            if (!cpuext.lbt) {
+                CLEAR_FLAGS(x3);
+            } else IFX (X_ALL) {
+                X64_SET_EFLAGS(xZR, X_ALL);
+            }
+            SET_DFNONE();
+            v0 = fpu_get_scratch(dyn);
+            IFX (X_ZF) {
+                VAND_Vxy(v0, q1, q0);
+                VSETEQZ_Vxy(fcc0, v0);
+                BCEQZ_MARK(fcc0);
+                if (cpuext.lbt) {
+                    ADDI_D(x3, xZR, 1 << F_ZF);
+                    X64_SET_EFLAGS(x3, X_ZF);
+                } else {
+                    ORI(xFlags, xFlags, 1 << F_ZF);
+                }
+            }
+            MARK;
+            IFX (X_CF) {
+                VANDN_Vxy(v0, q0, q1);
+                VSETEQZ_Vxy(fcc0, v0);
+                BCEQZ_MARK2(fcc0);
+                if (cpuext.lbt) {
+                    ADDI_D(x3, xZR, 1 << F_CF);
+                    X64_SET_EFLAGS(x3, X_CF);
+                } else {
+                    ORI(xFlags, xFlags, 1 << F_CF);
+                }
+            }
+            MARK2;
+            break;
         case 0x18:
             INST_NAME("VBROADCASTSS Gx, Ex");
             nextop = F8;
             GETEYSS(q2, 0, 0);
             GETGYxy_empty(q0);
-            if (vex.l) {
-                XVREPLVE0_W(q0, q2);
-            } else {
-                VREPLVE_W(q0, q2, 0);
-            }
+            VREPLVE0xy(W, q0, q2);
             break;
         case 0x19:
             INST_NAME("VBROADCASTSD Gx, Ex");
             nextop = F8;
             GETEYSD(q2, 0, 0);
             GETGYxy_empty(q0);
-            if (vex.l) {
-                XVREPLVE0_D(q0, q2);
-            } else {
-                VREPLVE_D(q0, q2, 0);
-            }
+            VREPLVE0xy(D, q0, q2);
             break;
         case 0x1A:
             INST_NAME("VBROADCASTF128 Gx, Ex");
@@ -309,6 +443,12 @@ uintptr_t dynarec64_AVX_66_0F38(dynarec_la64_t* dyn, uintptr_t addr, uintptr_t i
             GETGY_empty_VYEY_xy(v0, v1, v2, 0);
             VMULWEVxy(D_W, v0, v1, v2);
             break;
+        case 0x29:
+            INST_NAME("VPCMPEQQ Gx, Vx, Ex");
+            nextop = F8;
+            GETGY_empty_VYEY_xy(v0, v1, v2, 0);
+            VSEQxy(D, v0, v2, v1);
+            break;
         case 0x2B:
             INST_NAME("VPACKUSDW Gx, Vx, Ex");
             nextop = F8;
@@ -316,17 +456,17 @@ uintptr_t dynarec64_AVX_66_0F38(dynarec_la64_t* dyn, uintptr_t addr, uintptr_t i
             q0 = fpu_get_scratch(dyn);
             q1 = fpu_get_scratch(dyn);
             d0 = fpu_get_scratch(dyn);
-            VLDIxy(q0, 0b0010011111111); // broadcast 0xff as 16-bit elements to all lanes
+            VLDIxy(d0, (0b10111 <<8) | 0x00);  // Broadcast 0x0000FFFF as 32bits to all lane
             if (v1 == v2) {
-                VMAXIxy(W, v0, v1, 0);
-                VMINxy(W, v0, v1, q0);
-                VPICKEVxy(H, v0, v0, v0);
+                VMAXIxy(W, q0, v1, 0);
+                VMINxy(W, q0, q0, d0);
+                VPICKEVxy(H, v0, q0, q0);
             } else {
                 VMAXIxy(W, q1, v2, 0);
-                VMAXIxy(W, v0, v1, 0);
-                VMINxy(W, q1, q1, q0);
-                VMINxy(W, v0, v0, q0);
-                VPICKEVxy(H, v0, q1, v0);
+                VMAXIxy(W, q0, v1, 0);
+                VMINxy(W, q1, q1, d0);
+                VMINxy(W, q0, q0, d0);
+                VPICKEVxy(H, v0, q1, q0);
             }
             break;
         case 0x2C:
@@ -471,6 +611,18 @@ uintptr_t dynarec64_AVX_66_0F38(dynarec_la64_t* dyn, uintptr_t addr, uintptr_t i
                 VSLLWIL_DU_WU(q0, q1, 0);
             }
             break;
+        case 0x36:
+            INST_NAME("VPERMD Gx, Vx, Ex");
+            nextop = F8;
+            GETGY_empty_VYEY_xy(v0, v1, v2, 0);
+            XVPERM_W(v0, v2, v1);
+            break;
+        case 0x37:
+            INST_NAME("VPCMPGTQ Gx, Vx, Ex");
+            nextop = F8;
+            GETGY_empty_VYEY_xy(v0, v1, v2, 0);
+            VSLTxy(D, v0, v2, v1);
+            break;
         case 0x38:
             INST_NAME("VPMINSB Gx, Vx, Ex");
             nextop = F8;
@@ -525,6 +677,27 @@ uintptr_t dynarec64_AVX_66_0F38(dynarec_la64_t* dyn, uintptr_t addr, uintptr_t i
             GETGY_empty_VYEY_xy(v0, v1, v2, 0);
             VMULxy(W, v0, v1, v2);
             break;
+        case 0x41:
+            INST_NAME("VPHMINPOSUW Gx, Ex");
+            nextop = F8;
+            GETEYx(v1, 0, 0);
+            GETGYx_empty(v0);
+            q0 = fpu_get_scratch(dyn);
+            q1 = fpu_get_scratch(dyn);
+            q2 = fpu_get_scratch(dyn);
+                                           // v1[a,b,c,d,e,f,g,h]
+            VSHUF4I_W(q0, v1, 0b01001110); // q0[e,f,g,h,a,b,c,d]
+            VMIN_HU(q1, v1, q0);           // q1[ae,bf,cg,dh ...]
+            
+            VSHUF4I_H(q2, q1, 0b10110001); // q2[bf,ae,dh,cg ...]
+            VMIN_HU(q1, q1, q2);           // q1[aebf,aebf,cgdh,cgdh ...]
+            VSHUF4I_H(q0, q1, 0b01001110); // q0[cgdh,cgdh,aebf,aebf]
+            VMIN_HU(q2, q0, q1);           // all lane is min(abcdefgh)
+            VSEQ_H(q0, q2, v1);            // get mask(0xffff)
+            VFRSTPI_H(q2, q0, 1);          // find first neg(0xffff),insert index to q2
+            XVPICKVE_W(v0, q2, 0);
+            YMM_UNMARK_UPPER_ZERO(v0);
+            break;
         case 0x45:
             INST_NAME("VPSRLVD/Q Gx, Vx, Ex");
             nextop = F8;
@@ -565,6 +738,68 @@ uintptr_t dynarec64_AVX_66_0F38(dynarec_la64_t* dyn, uintptr_t addr, uintptr_t i
                 VSLEIxy(WU, d1, v2, 31);
                 VSLLxy(W, v0, v1, v2);
                 VAND_Vxy(v0, v0, d1);
+            }
+            break;
+        case 0x58:
+            INST_NAME("VPBROADCASTD Gx, Ex");
+            nextop = F8;
+            if (MODREG) {
+                GETEYx(v1, 0, 0);
+                GETGYxy_empty(v0);
+                VREPLVE0xy(W, v0, v1);
+            } else {
+                GETGYxy_empty(v0);
+                SMREAD();
+                addr = geted(dyn, addr, ninst, nextop, &ed, x4, x5, &fixedaddress, rex, NULL, 0, 0);
+                VLDREPLxy(W, v0, ed, 0);
+            }
+            break;
+        case 0x59:
+            INST_NAME("VPBROADCASTQ Gx, Ex");
+            nextop = F8;
+            if (MODREG) {
+                GETEYx(v1, 0, 0);
+                GETGYxy_empty(v0);
+                VREPLVE0xy(D, v0, v1);
+            } else {
+                GETGYxy_empty(v0);
+                SMREAD();
+                addr = geted(dyn, addr, ninst, nextop, &ed, x4, x5, &fixedaddress, rex, NULL, 0, 0);
+                VLDREPLxy(D, v0, ed, 0);
+            }
+            break;
+        case 0x5A:
+            INST_NAME("VBROADCASTI128 Gx, Ex");
+            nextop = F8;
+            GETGY_empty_EY_xy(q0, q2, 0);
+            XVREPLVE0_Q(q0, q2);
+            break;
+        case 0x78:
+            INST_NAME("VPBROADCASTB Gx, Ex");
+            nextop = F8;
+            if (MODREG) {
+                GETEYx(v1, 0, 0);
+                GETGYxy_empty(v0);
+                VREPLVE0xy(B, v0, v1);
+            } else {
+                GETGYxy_empty(v0);
+                SMREAD();
+                addr = geted(dyn, addr, ninst, nextop, &ed, x4, x5, &fixedaddress, rex, NULL, 0, 0);
+                VLDREPLxy(B, v0, ed, 0);
+            }
+            break;
+        case 0x79:
+            INST_NAME("VPBROADCASTW Gx, Ex");
+            nextop = F8;
+            if (MODREG) {
+                GETEYx(v1, 0, 0);
+                GETGYxy_empty(v0);
+                VREPLVE0xy(H, v0, v1);
+            } else {
+                GETGYxy_empty(v0);
+                SMREAD();
+                addr = geted(dyn, addr, ninst, nextop, &ed, x4, x5, &fixedaddress, rex, NULL, 0, 0);
+                VLDREPLxy(H, v0, ed, 0);
             }
             break;
         case 0x8C:
@@ -613,6 +848,410 @@ uintptr_t dynarec64_AVX_66_0F38(dynarec_la64_t* dyn, uintptr_t addr, uintptr_t i
                 VBITSEL_V(v0, v0, v2, d0);
                 PUTEYx(v0);
             }
+            break;
+        case 0x90:
+        case 0x92:
+            if (opcode == 0x90) {
+                INST_NAME("VPGATHERDD/VPGATHERDQ Gx, VSIB, Vx");
+            } else {
+                INST_NAME("VGATHERDPD/VGATHERDPS Gx, VSIB, Vx");
+            }
+            nextop = F8;
+            if (((nextop & 7) != 4) || MODREG) { UDF(); }
+            GETG;
+            u8 = F8; // SIB
+            if ((u8 & 0x7) == 0x5 && !(nextop & 0xC0)) {
+                int64_t i64 = F32S64;
+                MOV64x(x5, i64);
+                eb1 = x5;
+            } else
+                eb1 = TO_NAT((u8 & 0x7) + (rex.b << 3)); // base
+            eb2 = ((u8 >> 3) & 7) + (rex.x << 3);        // index
+            if (nextop & 0x40)
+                i32 = F8S;
+            else if (nextop & 0x80)
+                i32 = F32S;
+            else
+                i32 = 0;
+            if (!i32)
+                ed = eb1;
+            else {
+                ed = x3;
+                if (i32 < -2048 || i32 >= 2048) {
+                    MOV64x(ed, i32);
+                    ADD_D(ed, ed, eb1);
+                } else {
+                    ADDI_D(ed, eb1, i32);
+                }
+            }
+            // ed is base
+            wb1 = u8 >> 6; // scale
+            GETVYxy(v2, 1);
+            GETGYxy(v0, 1);
+            d0 = fpu_get_scratch(dyn);
+            d1 = fpu_get_scratch(dyn);
+
+            if (vex.l) {
+                v1 = avx_get_reg(dyn, ninst, x6, eb2, 0, LSX_AVX_WIDTH_256);
+                if (rex.w) {
+                    XVSRLI_D(d1, v2, 63);
+                } else {
+                    XVSRLI_W(d1, v2, 31);
+                };
+                for (int i = 0; i < (rex.w ? 4 : 8); i++) {
+                    XVPICKVE2GRxw(x4, d1, i);
+                    BEQZ(x4, 4 + 4 * 4);
+                    XVPICKVE2GR_WU(x4, v1, i);
+                    SLLI_D(x4, x4, wb1);
+                    LDXxw(x6, ed, x4);
+                    XVINSGR2VRxw(v0, x6, i);
+                }
+                XVXOR_V(v2, v2, v2);
+            } else {
+                v1 = avx_get_reg(dyn, ninst, x6, eb2, 0, LSX_AVX_WIDTH_128);
+                if (rex.w) {
+                    VSRLI_D(d1, v2, 63);
+                } else {
+                    VSRLI_W(d1, v2, 31);
+                };
+                for (int i = 0; i < (rex.w ? 2 : 4); i++) {
+                    VPICKVE2GRxw(x4, d1, i);
+                    BEQZ(x4, 4 + 4 * 4);
+                    VPICKVE2GR_WU(x4, v1, i);
+                    SLLI_D(x4, x4, wb1);
+                    LDXxw(x6, ed, x4);
+                    VINSGR2VRxw(v0, x6, i);
+                }
+                VXOR_V(v2, v2, v2);
+            }
+            break;
+        case 0x91:
+        case 0x93:
+            if (opcode == 0x91) {
+                INST_NAME("VPGATHERQD/VPGATHERQQ Gx, VSIB, Vx");
+            } else {
+                INST_NAME("VGATHERQPD/VGATHERQPS Gx, VSIB, Vx");
+            }
+            nextop = F8;
+            if (((nextop & 7) != 4) || MODREG) { UDF(); }
+            GETG;
+            u8 = F8; // SIB
+            if ((u8 & 0x7) == 0x5 && !(nextop & 0xC0)) {
+                int64_t i64 = F32S64;
+                MOV64x(x5, i64);
+                eb1 = x5;
+            } else
+                eb1 = TO_NAT((u8 & 0x7) + (rex.b << 3)); // base
+            eb2 = ((u8 >> 3) & 7) + (rex.x << 3);        // index
+            if (nextop & 0x40)
+                i32 = F8S;
+            else if (nextop & 0x80)
+                i32 = F32S;
+            else
+                i32 = 0;
+            if (!i32)
+                ed = eb1;
+            else {
+                ed = x3;
+                if (i32 < -2048 || i32 >= 2048) {
+                    MOV64x(ed, i32);
+                    ADD_D(ed, ed, eb1);
+                } else {
+                    ADDI_D(ed, eb1, i32);
+                }
+            }
+            // ed is base
+            wb1 = u8 >> 6; // scale
+            GETVYxy(v2, 1);
+            GETGYxy(v0, 1);
+            d0 = fpu_get_scratch(dyn);
+            d1 = fpu_get_scratch(dyn);
+
+            if (vex.l) {
+                v1 = avx_get_reg(dyn, ninst, x6, eb2, 0, LSX_AVX_WIDTH_256);
+                if (rex.w) {
+                    XVSRLI_D(d1, v2, 63);
+                } else {
+                    XVSRLI_W(d1, v2, 31);
+                };
+                for (int i = 0; i < 4; i++) {
+                    XVPICKVE2GRxw(x4, d1, i);
+                    BEQZ(x4, 4 + 4 * 4);
+                    XVPICKVE2GR_D(x4, v1, i);
+                    SLLI_D(x4, x4, wb1);
+                    LDXxw(x6, ed, x4);
+                    XVINSGR2VRxw(v0, x6, i);
+                }
+                XVXOR_V(v2, v2, v2);
+            } else {
+                v1 = avx_get_reg(dyn, ninst, x6, eb2, 0, LSX_AVX_WIDTH_128);
+                if (rex.w) {
+                    VSRLI_D(d1, v2, 63);
+                } else {
+                    VSRLI_W(d1, v2, 31);
+                };
+                for (int i = 0; i < 2; i++) {
+                    VPICKVE2GRxw(x4, d1, i);
+                    BEQZ(x4, 4 + 4 * 4);
+                    VPICKVE2GR_D(x4, v1, i);
+                    SLLI_D(x4, x4, wb1);
+                    LDXxw(x6, ed, x4);
+                    VINSGR2VRxw(v0, x6, i);
+                }
+                VXOR_V(v2, v2, v2);
+            }
+            break;
+        case 0x96:
+            INST_NAME("VFMADDSUB132PS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGY_VYEY_xy(v0, v1, v2, 0);
+            q0 = fpu_get_scratch(dyn);
+            VFMADDxyxw(q0, v0, v2, v1);
+            VFMSUBxyxw(v0, v0, v2, v1);
+            if (rex.w) {
+                VEXTRINSxy(D, v0, q0, VEXTRINS_IMM_4_0(1, 1));
+            } else {
+                VEXTRINSxy(W, v0, q0, VEXTRINS_IMM_4_0(1, 1));
+                VEXTRINSxy(W, v0, q0, VEXTRINS_IMM_4_0(3, 3));
+            }
+            break;
+        case 0x97:
+            INST_NAME("VFMSUBADD132PS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGY_VYEY_xy(v0, v1, v2, 0);
+            q0 = fpu_get_scratch(dyn);
+            VFMSUBxyxw(q0, v0, v2, v1);
+            VFMADDxyxw(v0, v0, v2, v1);
+            if (rex.w) {
+                VEXTRINSxy(D, v0, q0, VEXTRINS_IMM_4_0(1, 1));
+            } else {
+                VEXTRINSxy(W, v0, q0, VEXTRINS_IMM_4_0(1, 1));
+                VEXTRINSxy(W, v0, q0, VEXTRINS_IMM_4_0(3, 3));
+            }
+            break;
+        case 0x98:
+            INST_NAME("VFMADD132PS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGY_VYEY_xy(v0, v1, v2, 0);
+            VFMADDxyxw(v0, v0, v2, v1);
+            break;
+        case 0x99:
+            INST_NAME("VFMADD132SS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGYx_VYx_EYxw(v0, v1, v2, 0);
+            d0 = fpu_get_scratch(dyn);
+            FMADDxw(d0, v0, v2, v1);
+            VEXTRINSxw(v0, d0, 0);
+            break;
+        case 0x9A:
+            INST_NAME("VFMSUB132PS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGY_VYEY_xy(v0, v1, v2, 0);
+            VFMSUBxyxw(v0, v0, v2, v1);
+            break;
+        case 0x9B:
+            INST_NAME("VFMSUB132SS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGYx_VYx_EYxw(v0, v1, v2, 0);
+            d0 = fpu_get_scratch(dyn);
+            FMSUBxw(d0, v0, v2, v1);
+            VEXTRINSxw(v0, d0, 0);
+            break;
+        case 0x9C:
+            INST_NAME("VFNMADD132PS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGY_VYEY_xy(v0, v1, v2, 0);
+            VFNMSUBxyxw(v0, v0, v2, v1);
+            break;
+        case 0x9D:
+            INST_NAME("VFNMADD132SS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGYx_VYx_EYxw(v0, v1, v2, 0);
+            d0 = fpu_get_scratch(dyn);
+            FNMSUBxw(d0, v0, v2, v1);
+            VEXTRINSxw(v0, d0, 0);
+            break;
+        case 0x9E:
+            INST_NAME("VFNMSUB132PS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGY_VYEY_xy(v0, v1, v2, 0);
+            VFNMADDxyxw(v0, v0, v2, v1);
+            break;
+        case 0x9F:
+            INST_NAME("VFNMSUB132SS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGYx_VYx_EYxw(v0, v1, v2, 0);
+            d0 = fpu_get_scratch(dyn);
+            FNMADDxw(d0, v0, v2, v1);
+            VEXTRINSxw(v0, d0, 0);
+            break;
+        case 0xA6:
+            INST_NAME("VFMADDSUB213PS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGY_VYEY_xy(v0, v1, v2, 0);
+            q0 = fpu_get_scratch(dyn);
+            VFMADDxyxw(q0, v1, v0, v2);
+            VFMSUBxyxw(v0, v1, v0, v2);
+            if (rex.w) {
+                VEXTRINSxy(D, v0, q0, VEXTRINS_IMM_4_0(1, 1));
+            } else {
+                VEXTRINSxy(W, v0, q0, VEXTRINS_IMM_4_0(1, 1));
+                VEXTRINSxy(W, v0, q0, VEXTRINS_IMM_4_0(3, 3));
+            }
+            break;
+        case 0xA7:
+            INST_NAME("VFMSUBADD213PS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGY_VYEY_xy(v0, v1, v2, 0);
+            q0 = fpu_get_scratch(dyn);
+            VFMSUBxyxw(q0, v1, v0, v2);
+            VFMADDxyxw(v0, v1, v0, v2);
+            if (rex.w) {
+                VEXTRINSxy(D, v0, q0, VEXTRINS_IMM_4_0(1, 1));
+            } else {
+                VEXTRINSxy(W, v0, q0, VEXTRINS_IMM_4_0(1, 1));
+                VEXTRINSxy(W, v0, q0, VEXTRINS_IMM_4_0(3, 3));
+            }
+            break;
+        case 0xA8:
+            INST_NAME("VFMADD213PS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGY_VYEY_xy(v0, v1, v2, 0);
+            VFMADDxyxw(v0, v1, v0, v2);
+            break;
+        case 0xA9:
+            INST_NAME("VFMADD213SS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGYx_VYx_EYxw(v0, v1, v2, 0);
+            d0 = fpu_get_scratch(dyn);
+            FMADDxw(d0, v1, v0, v2);
+            VEXTRINSxw(v0, d0, 0);
+            break;
+        case 0xAA:
+            INST_NAME("VFMSUB213PS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGY_VYEY_xy(v0, v1, v2, 0);
+            VFMSUBxyxw(v0, v1, v0, v2);
+            break;
+        case 0xAB:
+            INST_NAME("VFMSUB213SS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGYx_VYx_EYxw(v0, v1, v2, 0);
+            d0 = fpu_get_scratch(dyn);
+            FMSUBxw(d0, v1, v0, v2);
+            VEXTRINSxw(v0, d0, 0);
+            break;
+        case 0xAC:
+            INST_NAME("VFNMADD213PS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGY_VYEY_xy(v0, v1, v2, 0);
+            VFNMSUBxyxw(v0, v1, v0, v2);
+            break;
+        case 0xAD:
+            INST_NAME("VFNMADD213SS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGYx_VYx_EYxw(v0, v1, v2, 0);
+            d0 = fpu_get_scratch(dyn);
+            FNMSUBxw(d0, v1, v0, v2);
+            VEXTRINSxw(v0, d0, 0);
+            break;
+        case 0xAE:
+            INST_NAME("VFNMSUB213PS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGY_VYEY_xy(v0, v1, v2, 0);
+            VFNMADDxyxw(v0, v1, v0, v2);
+            break;
+        case 0xAF:
+            INST_NAME("VFNMSUB213SS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGYx_VYx_EYxw(v0, v1, v2, 0);
+            d0 = fpu_get_scratch(dyn);
+            FNMADDxw(d0, v1, v0, v2);
+            VEXTRINSxw(v0, d0, 0);
+            break;
+        case 0xB6:
+            INST_NAME("VFMADDSUB231PS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGY_VYEY_xy(v0, v1, v2, 0);
+            q0 = fpu_get_scratch(dyn);
+            VFMADDxyxw(q0, v1, v2, v0);
+            VFMSUBxyxw(v0, v1, v2, v0);
+            if (rex.w) {
+                VEXTRINSxy(D, v0, q0, VEXTRINS_IMM_4_0(1, 1));
+            } else {
+                VEXTRINSxy(W, v0, q0, VEXTRINS_IMM_4_0(1, 1));
+                VEXTRINSxy(W, v0, q0, VEXTRINS_IMM_4_0(3, 3));
+            }
+            break;
+        case 0xB7:
+            INST_NAME("VFMSUBADD231PS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGY_VYEY_xy(v0, v1, v2, 0);
+            q0 = fpu_get_scratch(dyn);
+            VFMSUBxyxw(q0, v1, v2, v0);
+            VFMADDxyxw(v0, v1, v2, v0);
+            if (rex.w) {
+                VEXTRINSxy(D, v0, q0, VEXTRINS_IMM_4_0(1, 1));
+            } else {
+                VEXTRINSxy(W, v0, q0, VEXTRINS_IMM_4_0(1, 1));
+                VEXTRINSxy(W, v0, q0, VEXTRINS_IMM_4_0(3, 3));
+            }
+            break;
+        case 0xB8:
+            INST_NAME("VFMADD231PS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGY_VYEY_xy(v0, v1, v2, 0);
+            VFMADDxyxw(v0, v1, v2, v0);
+            break;
+        case 0xB9:
+            INST_NAME("VFMADD231SS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGYx_VYx_EYxw(v0, v1, v2, 0);
+            d0 = fpu_get_scratch(dyn);
+            FMADDxw(d0, v1, v2, v0);
+            VEXTRINSxw(v0, d0, 0);
+            break;
+        case 0xBA:
+            INST_NAME("VFMSUB231PS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGY_VYEY_xy(v0, v1, v2, 0);
+            VFMSUBxyxw(v0, v1, v2, v0);
+            break;
+        case 0xBB:
+            INST_NAME("VFMSUB231SS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGYx_VYx_EYxw(v0, v1, v2, 0);
+            d0 = fpu_get_scratch(dyn);
+            FMSUBxw(d0, v1, v2, v0);
+            VEXTRINSxw(v0, d0, 0);
+            break;
+        case 0xBC:
+            INST_NAME("VFNMADD231PS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGY_VYEY_xy(v0, v1, v2, 0);
+            VFNMSUBxyxw(v0, v1, v2, v0);
+            break;
+        case 0xBD:
+            INST_NAME("VFNMADD231SS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGYx_VYx_EYxw(v0, v1, v2, 0);
+            d0 = fpu_get_scratch(dyn);
+            FNMSUBxw(d0, v1, v2, v0);
+            VEXTRINSxw(v0, d0, 0);
+            break;
+        case 0xBE:
+            INST_NAME("VFNMSUB231PS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGY_VYEY_xy(v0, v1, v2, 0);
+            VFNMADDxyxw(v0, v1, v2, v0);
+            break;
+        case 0xBF:
+            INST_NAME("VFNMSUB231SS/D Gx, Vx, Ex");
+            nextop = F8;
+            GETGYx_VYx_EYxw(v0, v1, v2, 0);
+            d0 = fpu_get_scratch(dyn);
+            FNMADDxw(d0, v1, v2, v0);
+            VEXTRINSxw(v0, d0, 0);
             break;
         case 0xF7:
             INST_NAME("SHLX Gd, Ed, Vd");

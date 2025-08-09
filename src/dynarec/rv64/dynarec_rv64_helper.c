@@ -262,6 +262,7 @@ static uintptr_t geted_32(dynarec_rv64_t* dyn, uintptr_t addr, int ninst, uint8_
                     } else {
                         if (sib >> 6) {
                             SLLI(ret, TO_NAT(sib_reg), (sib >> 6));
+                            ZEROUP(ret);
                             if (!IS_GPR(ret)) SCRATCH_USAGE(1);
                         } else
                             ret = TO_NAT(sib_reg);
@@ -2197,8 +2198,6 @@ void fpu_pushcache(dynarec_rv64_t* dyn, int ninst, int s1, int not07)
     }
 
     // for vector registers, we might lost all of them, that means for extcache,
-    // we're saving 0..15 (SSE).
-    // TODO: save MMX registers too when we add support for MMX vector.
     n = 0;
     for (int i = start; i < 16; i++)
         if (dyn->e.ssecache[i].v != -1 && dyn->e.ssecache[i].vector) ++n;
@@ -2222,6 +2221,19 @@ void fpu_pushcache(dynarec_rv64_t* dyn, int ninst, int s1, int not07)
                 }
             }
         MESSAGE(LOG_DUMP, "\t------- Push (vector) XMM Cache (%d)\n", n);
+    }
+    n = 0;
+    for (int i = 0; i < 8; ++i)
+        if (dyn->e.mmxcache[i].v != -1 && dyn->e.mmxcache[i].vector) ++n;
+    if (n) {
+        MESSAGE(LOG_DUMP, "\tPush (vector) MMX Cache (%d)------\n", n);
+        for (int i = 0; i < 8; ++i)
+            if (dyn->e.mmxcache[i].v != -1 && dyn->e.mmxcache[i].vector) {
+                SET_ELEMENT_WIDTH(s1, VECTOR_SEW64, 0);
+                VFMV_F_S(dyn->e.mmxcache[i].reg, dyn->e.mmxcache[i].reg);
+                FSD(dyn->e.mmxcache[i].reg, xEmu, offsetof(x64emu_t, mmx[i]));
+            }
+        MESSAGE(LOG_DUMP, "\t------- Push (vector) MMX Cache (%d)\n", n);
     }
 }
 void fpu_popcache(dynarec_rv64_t* dyn, int ninst, int s1, int not07)
@@ -2248,7 +2260,7 @@ void fpu_popcache(dynarec_rv64_t* dyn, int ninst, int s1, int not07)
     for (int i = 18; i < 24; ++i)
         if (dyn->e.extcache[i].v != 0) ++n;
     if (n) {
-        MESSAGE(LOG_DUMP, "\tPush (float) x87/MMX Cache (%d)------\n", n);
+        MESSAGE(LOG_DUMP, "\tPop (float) x87/MMX Cache (%d)------\n", n);
         int p = 0;
         for (int i = 18; i < 24; ++i)
             if (dyn->e.extcache[i].v != 0) {
@@ -2264,11 +2276,10 @@ void fpu_popcache(dynarec_rv64_t* dyn, int ninst, int s1, int not07)
                 ++p;
             }
         ADDI(xSP, xSP, 8 * ((n + 1) & ~1));
-        MESSAGE(LOG_DUMP, "\t------- Push (float) x87/MMX Cache (%d)\n", n);
+        MESSAGE(LOG_DUMP, "\t------- Pop (float) x87/MMX Cache (%d)\n", n);
     }
 
     // vector registers
-    // TODO: restore MMX registers too when we add support for MMX vector.
     n = 0;
     for (int i = start; i < 16; i++)
         if (dyn->e.ssecache[i].v != -1 && dyn->e.ssecache[i].vector) ++n;
@@ -2283,6 +2294,19 @@ void fpu_popcache(dynarec_rv64_t* dyn, int ninst, int s1, int not07)
                 }
             }
         MESSAGE(LOG_DUMP, "\t------- Pop (vector) XMM Cache (%d)\n", n);
+    }
+    n = 0;
+    for (int i = 0; i < 8; ++i)
+        if (dyn->e.mmxcache[i].v != -1 && dyn->e.mmxcache[i].vector) ++n;
+    if (n) {
+        MESSAGE(LOG_DUMP, "\tPop (vector) MMX Cache (%d)------\n", n);
+        for (int i = 0; i < 8; ++i)
+            if (dyn->e.mmxcache[i].v != -1 && dyn->e.mmxcache[i].vector) {
+                SET_ELEMENT_WIDTH(s1, VECTOR_SEW64, 0);
+                FLD(dyn->e.mmxcache[i].reg, xEmu, offsetof(x64emu_t, mmx[i]));
+                VFMV_S_F(dyn->e.mmxcache[i].reg, dyn->e.mmxcache[i].reg);
+            }
+        MESSAGE(LOG_DUMP, "\t------- Pop (vector) MMX Cache (%d)\n", n);
     }
 }
 
@@ -2762,33 +2786,22 @@ static void flagsCacheTransform(dynarec_rv64_t* dyn, int ninst, int s1)
     int jmp = dyn->insts[ninst].x64.jmp_insts;
     if (jmp < 0)
         return;
-    if (dyn->f.dfnone) // flags are fully known, nothing we can do more
+    if (dyn->f.dfnone || ((dyn->insts[jmp].f_exit.dfnone && !dyn->insts[jmp].f_entry.dfnone) && !dyn->insts[jmp].x64.use_flags)) // flags are fully known, nothing we can do more
         return;
     MESSAGE(LOG_DUMP, "\tFlags fetch ---- ninst=%d -> %d\n", ninst, jmp);
-    int go = 0;
+    int go = (dyn->insts[jmp].f_entry.dfnone && !dyn->f.dfnone && !dyn->insts[jmp].df_notneeded) ? 1 : 0;
     switch (dyn->insts[jmp].f_entry.pending) {
-        case SF_UNKNOWN: break;
-        case SF_SET:
-            if (dyn->f.pending != SF_SET && dyn->f.pending != SF_SET_PENDING)
-                go = 1;
+        case SF_UNKNOWN:
+            go = 0;
             break;
-        case SF_SET_PENDING:
-            if (dyn->f.pending != SF_SET
-                && dyn->f.pending != SF_SET_PENDING
-                && dyn->f.pending != SF_PENDING)
-                go = 1;
-            break;
-        case SF_PENDING:
-            if (dyn->f.pending != SF_SET
-                && dyn->f.pending != SF_SET_PENDING
-                && dyn->f.pending != SF_PENDING)
-                go = 1;
-            else
-                go = (dyn->insts[jmp].f_entry.dfnone == dyn->f.dfnone) ? 0 : 1;
+        default:
+            if (go && !(dyn->insts[jmp].x64.need_before & X_PEND) && (dyn->f.pending != SF_UNKNOWN)) {
+                // just clear df flags
+                go = 0;
+                SW(xZR, xEmu, offsetof(x64emu_t, df));
+            }
             break;
     }
-    if (dyn->insts[jmp].f_entry.dfnone && !dyn->f.dfnone)
-        go = 1;
     if (go) {
         if (dyn->f.pending != SF_PENDING) {
             LW(s1, xEmu, offsetof(x64emu_t, df));
